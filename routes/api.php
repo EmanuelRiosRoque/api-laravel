@@ -25,7 +25,7 @@ Route::get('/ConsultarMaterias', [materiasController::class, 'index']);
 
 Route::post('/RecibirExhorto', [ExhortoController::class, 'requestExhorto']);
 Route::get('/RecibirExhortoResponse/{id}', [ExhortoController::class,'responseExhorto']);
-Route::get('/ConsultaExhorto/{id}', [ExhortoController::class,'buscarAcusePorFolioSeguimiento']);
+Route::get('/ConsultaExhorto/{folioSeguimiento}', [ExhortoController::class,'buscarExhortoPorFolioSeguimiento']);
 
 
 Route::post('/RecibirExhortoArchivoRequest', [ExhortoController::class,'requestExhortoArchivo']);
@@ -34,6 +34,10 @@ Route::get('/ConsultaArchivoAcuse/{exhortoOrigenId}', [AcusesController::class, 
 
 
 Route::post('/RecibirRespuestaExhorto', [ExhortoController::class,'recibirRespuestaExhorto']);
+Route::post('/RecibirRespuestaExhortoArchivo', [ExhortoController::class,'recibirRespuestaExhortoArchivo']);
+
+
+Route::put('/ActualizarExhortoRequest', [ExhortoController::class, 'actualizarExhortoRequest']);
 
 
 

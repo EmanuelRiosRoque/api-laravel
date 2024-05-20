@@ -2,14 +2,18 @@
 
 namespace App\Http\Controllers\Api;
 
+use Carbon\Carbon;
 use App\Models\Acuse;
 use App\Models\Partes;
 use App\Models\Exhortos;
 use Illuminate\Http\Request;
 use App\Models\ArchivoARecibir;
 use App\Models\exhortoArchivos;
+use App\Models\RespuestaExhorto;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use App\Models\RegistroActualizacion;
+use App\Models\RespuestaExhortoArchivo;
 use Illuminate\Support\Facades\Validator;
 
 class ExhortoController extends Controller
@@ -187,7 +191,6 @@ class ExhortoController extends Controller
             return response()->json($data, 500);
         }
     }
-
     public function requestExhortoArchivo(Request $request)
     {
         // Validación de datos
@@ -256,8 +259,7 @@ class ExhortoController extends Controller
             ], 500);
         }
     }
-
-    public function buscarAcusePorFolioSeguimiento(Request $request, $folioSeguimiento)
+    public function buscarExhortoPorFolioSeguimiento(Request $request, $folioSeguimiento)
     {
         // Validar el formato del UUID
         $validator = Validator::make(['folioSeguimiento' => $folioSeguimiento], [
@@ -303,9 +305,9 @@ class ExhortoController extends Controller
             'message' => 'Acuse y exhorto encontrados.',
             'errors' => null,
             'data' => [
-                'Acuse' => $acuse,
+                // 'Acuse' => $acuse,
                 'Exhorto' => [
-                    'id' => $exhorto->exhortoOrigenId,
+                    'exhortoOrigenId' => $exhorto->exhortoOrigenId,
                     'municipioDestinoId' => $exhorto->municipioDestinoId,
                     'materiaClave' => $exhorto->materiaClave,
                     'estadoOrigenId' => $exhorto->estadoOrigenId,
@@ -329,106 +331,271 @@ class ExhortoController extends Controller
             ]
         ], 200);
     }
+    public function recibirRespuestaExhorto(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'exhortoId' => 'required|uuid',
+            'respuestaOrigenId' => 'required|uuid',
+            'municipioTurnadoId' => 'required|integer',
+            'areaTurnadoId' => 'nullable|string',
+            'areaTurnadoNombre' => 'required|string',
+            'numeroExhorto' => 'nullable|string',
+            'tipoDiligenciado' => 'required|integer',
+            'observaciones' => 'nullable|string',
+            'archivos' => 'required|array',
+            'archivos.*.nombreArchivo' => 'required|string',
+            'archivos.*.hashSha1' => 'required|string',
+            'archivos.*.hashSha256' => 'required|string',
+            'archivos.*.tipoDocumento' => 'required|integer',
+        ])->stopOnFirstFailure();
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La petición no se pudo realizar por datos incorrectos que se enviaron al servicio.',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 400);
+        }
+
+        $errors = [];
+
+        // Iniciar una transacción para asegurar la integridad de la base de datos
+        DB::beginTransaction();
+
+        try {
+            $respuestaExhortoData = $request->only([
+                'exhortoId',
+                'respuestaOrigenId',
+                'municipioTurnadoId',
+                'areaTurnadoId',
+                'areaTurnadoNombre',
+                'numeroExhorto',
+                'tipoDiligenciado',
+                'observaciones'
+            ]);
+
+            // Crear la respuesta del exhorto
+            $respuestaExhorto = RespuestaExhorto::create($respuestaExhortoData);
+
+            if (!$respuestaExhorto) {
+                throw new \Exception("Error al crear la respuesta del exhorto");
+            }
+
+            // Crear archivos
+            foreach ($request->archivos as $archivoData) {
+                $archivo = ArchivoARecibir::create([
+                    'exhortoOrigenId' => $respuestaExhorto->exhortoId,
+                    'nombreArchivo' => $archivoData['nombreArchivo'],
+                    'hashSha1' => $archivoData['hashSha1'],
+                    'hashSha256' => $archivoData['hashSha256'],
+                    'tipoDocumento' => $archivoData['tipoDocumento'],
+                ]);
+
+                if (!$archivo) {
+                    $errors[] = "Error al crear el archivo: " . json_encode($archivoData);
+                }
+            }
+
+            // Si hay errores, revertir la transacción y devolver una respuesta con los errores
+            if (!empty($errors)) {
+                throw new \Exception("Hubo un problema al crear los archivos.");
+            }
+
+            // Confirmar la transacción
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'La operación se realizó exitosamente, la respuesta del exhorto se creó correctamente.',
+                'errors' => null,
+                'data' => [
+                    'exhortoId' => $respuestaExhorto->exhortoId,
+                    'respuestaExhortoId' => $respuestaExhorto->id,
+                    'fechaHora' => $respuestaExhorto->created_at,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            // Revertir la transacción si hay un error
+            DB::rollBack();
+            $errors[] = $e->getMessage();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Hubo un problema al crear la respuesta del exhorto.',
+                'errors' => $errors,
+                'data' => null
+            ], 500);
+        }
+    }
+    public function recibirRespuestaExhortoArchivo(Request $request)
+    {
+        // Validación de datos
+        $validator = Validator::make($request->all(), [
+            'exhortoId' => 'required|uuid|exists:exhortos,exhortoOrigenId',
+            'respuestaOrigenId' => 'required|uuid',
+            'archivo' => 'required|string'
+        ])->stopOnFirstFailure();
+
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La petición no se pudo realizar por datos incorrectos que se enviaron al servicio.',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 400);
+        }
+
+        try {
+            $archivoData = $request->only(['exhortoId', 'respuestaOrigenId', 'archivo']);
+
+            // Iniciar una transacción para asegurar la integridad de la base de datos
+            DB::beginTransaction();
+
+            //Insertar en la tabla respuesta exhorto archivos
+            $resExhortoArchivo = RespuestaExhortoArchivo::create([
+                'exhortoId' => $archivoData['exhortoId'],
+                'respuestaOrigenId' => $archivoData['respuestaOrigenId']
+            ]);
+
+            // Crear el registro de archivo en la tabla archivo_a_recibirs
+            $archivoARecibir = exhortoArchivos::create([
+                'exhortoOrigenId' => $archivoData['exhortoId'],
+                'archivo' => $archivoData['archivo'],
+            ]);
+
+            if (!$resExhortoArchivo) {
+                throw new \Exception("Error al crear el archivo de respuesta del exhorto archivo");
+            }
+            if (!$archivoARecibir) {
+                throw new \Exception("Error al crear el archivo de respuesta del exhorto");
+            }
 
 
-    // public function recibirRespuestaExhorto(Request $request)
-    // {
-    //     $validator = Validator::make($request->all(), [
-    //         'exhortoId' => 'required|string',
-    //         'respuestaOrigenId' => 'required|string',
-    //         'municipioTurnadoId' => 'required|integer',
-    //         'areaTurnadoId' => 'nullable|string',
-    //         'areaTurnadoNombre' => 'required|string',
-    //         'numeroExhorto' => 'nullable|string',
-    //         'tipoDiligenciado' => 'required|integer|in:0,1,2',
-    //         'observaciones' => 'nullable|string',
-    //         'archivos' => 'required|array',
-    //         'archivos.*.nombreArchivo' => 'required|string',
-    //         'archivos.*.hashSha1' => 'required|string',
-    //         'archivos.*.hashSha256' => 'required|string',
-    //         'archivos.*.tipoDocumento' => 'required|integer',
-    //     ])->stopOnFirstFailure();
+            // Confirmar la transacción
+            DB::commit();
 
-    //     if ($validator->fails()) {
-    //         return response()->json([
-    //             'success' => false,
-    //             'message' => 'La petición no se pudo realizar por datos incorrectos que se enviaron al servicio.',
-    //             'errors' => $validator->errors(),
-    //             'data' => null
-    //         ], 400);
-    //     }
+            // Consultar la tabla archivo_a_recibirs para traer los registros que coincidan con exhortoId
+            $exhortosArchivos = exhortoArchivos::where('exhortoOrigenId', $archivoData['exhortoId'])->get();
 
-    //     $errors = [];
+            // Consultar la tabla acuses para traer los registros que coincidan con exhortoId
+            $acuses = Acuse::where('exhortoOrigenId', $archivoData['exhortoId'])->get();
 
-    //     // Iniciar una transacción para asegurar la integridad de la base de datos
-    //     DB::beginTransaction();
+            $acuseData = $acuses->isEmpty() ? 'Sin acuses' : $acuses;
 
-    //     try {
-    //         $respuestaExhortoData = $request->only([
-    //             'exhortoId',
-    //             'respuestaOrigenId',
-    //             'municipioTurnadoId',
-    //             'areaTurnadoId',
-    //             'areaTurnadoNombre',
-    //             'numeroExhorto',
-    //             'tipoDiligenciado',
-    //             'observaciones'
-    //         ]);
+            return response()->json([
+                'success' => true,
+                'message' => 'La operación se realizó exitosamente, el archivo de respuesta del exhorto se creó correctamente.',
+                'errors' => null,
+                'data' => [
+                    'archivoARecibirId' => $archivoARecibir->id,
+                    'fechaHora' => $archivoARecibir->created_at,
+                    'exhortosArchivos' => $exhortosArchivos,
+                    'acuses' => $acuseData,
+                ]
+            ], 200);
 
-    //         // Crear la respuesta del exhorto
-    //         $respuestaExhorto = RespuestaExhorto::create($respuestaExhortoData);
+        } catch (\Exception $e) {
+            // Revertir la transacción si hay un error
+            DB::rollBack();
 
-    //         if (!$respuestaExhorto) {
-    //             throw new \Exception("Error al crear la respuesta del exhorto");
-    //         }
+            return response()->json([
+                'success' => false,
+                'message' => 'Hubo un problema al crear el archivo de respuesta del exhorto.',
+                'errors' => $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
+    public function actualizarExhortoRequest(Request $request)
+    {
+        // Validación de datos
+        $validator = Validator::make($request->all(), [
+            'exhortoId' => 'required|uuid|exists:exhortos,exhortoOrigenId',
+            'actualizacionOrigenId' => 'required|uuid',
+            'tipoActualizacion' => 'required|string',
+            'fechaHora' => 'required|date',
+            'descripcion' => 'required|string',
+            'areaTurnadoNombre' => 'nullable|string',
+            'numeroExhorto' => 'nullable|string'
+        ])->stopOnFirstFailure();
 
-    //         // Crear archivos
-    //         foreach ($request->archivos as $archivoData) {
-    //             $archivo = ArchivoARecibir::create([
-    //                 'exhorto_id' => $respuestaExhorto->id,
-    //                 'nombreArchivo' => $archivoData['nombreArchivo'],
-    //                 'hashSha1' => $archivoData['hashSha1'],
-    //                 'hashSha256' => $archivoData['hashSha256'],
-    //                 'tipoDocumento' => $archivoData['tipoDocumento'],
-    //             ]);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La petición no se pudo realizar por datos incorrectos que se enviaron al servicio.',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 400);
+        }
 
-    //             if (!$archivo) {
-    //                 $errors[] = "Error al crear el archivo: " . json_encode($archivoData);
-    //             }
-    //         }
-
-    //         // Si hay errores, revertir la transacción y devolver una respuesta con los errores
-    //         if (!empty($errors)) {
-    //             throw new \Exception("Hubo un problema al crear los archivos.");
-    //         }
-
-    //         // Confirmar la transacción
-    //         DB::commit();
-
-    //         return response()->json([
-    //             'success' => true,
-    //             'message' => 'La operación se realizó exitosamente, la respuesta del exhorto se creó correctamente.',
-    //             'errors' => null,
-    //             'data' => [
-    //                 'respuestaExhortoId' => $respuestaExhorto->id,
-    //                 'fechaHora' => $respuestaExhorto->created_at,
-    //             ]
-    //         ], 200);
-
-    //     } catch (\Exception $e) {
-    //         // Revertir la transacción si hay un error
-    //         DB::rollBack();
-    //         $errors[] = $e->getMessage();
-
-    //         return response()->json([
-    //             'success' => false,
-    //             'message' => 'Hubo un problema al crear la respuesta del exhorto.',
-    //             'errors' => $errors,
-    //             'data' => null
-    //         ], 500);
-    //     }
-    // }
+        try {
+            // Iniciar una transacción para asegurar la integridad de la base de datos
+            DB::beginTransaction();
 
 
+            // Buscar el registro en la tabla respuesta_exhortos
+            $respuestaExhorto = RespuestaExhorto::where('exhortoId', $request->input('exhortoId'))->first();
+
+
+            if (!$respuestaExhorto) {
+                throw new \Exception("Respuesta del exhorto no encontrada");
+            }
+
+            // Actualizar los campos si están presentes en la solicitud
+            if ($request->has('areaTurnadoNombre')) {
+                $respuestaExhorto->areaTurnadoNombre = $request->input('areaTurnadoNombre');
+            }
+
+            if ($request->has('numeroExhorto')) {
+                $respuestaExhorto->numeroExhorto = $request->input('numeroExhorto');
+            }
+
+            // Guardar los cambios
+            $respuestaExhorto->save();
+
+            // Formatear la fecha correctamente para MySQL
+            $fechaHora = Carbon::createFromFormat('Y-m-d\TH:i:s\Z', $request->input('fechaHora'))->toDateTimeString();
+
+            // Registrar la actualización
+            $registroActualizacion = RegistroActualizacion::create([
+                'exhortoId'=> $request->input('exhortoId'),
+                'actualizacionOrigenId'=> $request->input('actualizacionOrigenId'),
+                'tipoActualizacion'=> $request->input('tipoActualizacion'),
+                'fechaHora'=> $fechaHora,
+                'descripcion'=> $request->input('descripcion'),
+            ]);
+
+            if (!$registroActualizacion) {
+                throw new \Exception("Hubo un problema al registrar la actualizacion");
+            }
+
+
+            // Confirmar la transacción
+            DB::commit();
+
+            return response()->json([
+                'success' => true,
+                'message' => 'La operación se realizó exitosamente, la respuesta del exhorto se actualizó correctamente.',
+                'errors' => null,
+                'data' => [
+                    'respuestaExhortoId' => $respuestaExhorto->id,
+                    'fechaHora' => $respuestaExhorto->updated_at,
+                ]
+            ], 200);
+
+        } catch (\Exception $e) {
+            // Revertir la transacción si hay un error
+            DB::rollBack();
+
+            return response()->json([
+                'success' => false,
+                'message' => 'Hubo un problema al actualizar la respuesta del exhorto.',
+                'errors' => $e->getMessage(),
+                'data' => null
+            ], 500);
+        }
+    }
 
 }

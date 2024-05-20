@@ -20,4 +20,9 @@ class ArchivoARecibir extends Model
     {
         return $this->belongsTo(Exhortos::class, 'exhortoOrigenId', 'exhortoOrigenId');
     }
+
+    public function respuestaExhorto()
+    {
+        return $this->belongsTo(RespuestaExhorto::class, 'exhortoOrigenId', 'exhortoId');
+    }
 }

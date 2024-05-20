@@ -11,8 +11,11 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('respuest_exhortos', function (Blueprint $table) {
+        Schema::create('respuesta_exhorto_archivos', function (Blueprint $table) {
             $table->id();
+            $table->uuid('exhortoId');
+            $table->uuid('respuestaOrigenId');
+            $table->foreign('exhortoId')->references('exhortoOrigenId')->on('exhortos')->onDelete('cascade');
             $table->timestamps();
         });
     }
@@ -22,6 +25,6 @@ return new class extends Migration
      */
     public function down(): void
     {
-        Schema::dropIfExists('respuest_exhortos');
+        Schema::dropIfExists('respuesta_exhorto_archivos');
     }
 };
