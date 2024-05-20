@@ -21,34 +21,27 @@ Route::middleware('auth:sanctum')->get('/user', function (Request $request) {
     return $request->user();
 });
 
-Route::get('/ConsultarMaterias', [materiasController::class, 'index']);
+Route::post('/login', [ExhortoController::class, 'login'])->name('login');
 
-Route::post('/RecibirExhorto', [ExhortoController::class, 'requestExhorto']);
-Route::get('/RecibirExhortoResponse/{id}', [ExhortoController::class,'responseExhorto']);
-Route::get('/ConsultaExhorto/{folioSeguimiento}', [ExhortoController::class,'buscarExhortoPorFolioSeguimiento']);
+Route::middleware('auth:sanctum')->group(function () {
+    Route::get('/ConsultarMaterias', [materiasController::class, 'index']);
 
-
-Route::post('/RecibirExhortoArchivoRequest', [ExhortoController::class,'requestExhortoArchivo']);
-Route::post('/AcuseRecibido', [AcusesController::class,'acuseRecibido']);
-Route::get('/ConsultaArchivoAcuse/{exhortoOrigenId}', [AcusesController::class, 'consultarArchivo']);
+    Route::post('/RecibirExhorto', [ExhortoController::class, 'requestExhorto']);
+    Route::get('/RecibirExhortoResponse/{id}', [ExhortoController::class,'responseExhorto']);
+    Route::get('/ConsultaExhorto/{folioSeguimiento}', [ExhortoController::class,'buscarExhortoPorFolioSeguimiento']);
 
 
-Route::post('/RecibirRespuestaExhorto', [ExhortoController::class,'recibirRespuestaExhorto']);
-Route::post('/RecibirRespuestaExhortoArchivo', [ExhortoController::class,'recibirRespuestaExhortoArchivo']);
+    Route::post('/RecibirExhortoArchivoRequest', [ExhortoController::class,'requestExhortoArchivo']);
+    Route::post('/AcuseRecibido', [AcusesController::class,'acuseRecibido']);
+    Route::get('/ConsultaArchivoAcuse/{exhortoOrigenId}', [AcusesController::class, 'consultarArchivo']);
 
 
-Route::put('/ActualizarExhortoRequest', [ExhortoController::class, 'actualizarExhortoRequest']);
+    Route::post('/RecibirRespuestaExhorto', [ExhortoController::class,'recibirRespuestaExhorto']);
+    Route::post('/RecibirRespuestaExhortoArchivo', [ExhortoController::class,'recibirRespuestaExhortoArchivo']);
 
 
-
-Route::post('/empleados', function() {
-    return 'Creando empleado';
+    Route::put('/ActualizarExhortoRequest', [ExhortoController::class, 'actualizarExhortoRequest']);
 });
 
-Route::put('/empleados/{id}', function() {
-    return 'Actualizando empleado';
-});
 
-Route::delete('/empleados/{id}', function() {
-    return 'Eliminando empleado';
-});
+

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api;
 
 use Carbon\Carbon;
+use App\Models\User;
 use App\Models\Acuse;
 use App\Models\Partes;
 use App\Models\Exhortos;
@@ -12,13 +13,51 @@ use App\Models\exhortoArchivos;
 use App\Models\RespuestaExhorto;
 use Illuminate\Support\Facades\DB;
 use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Hash;
 use App\Models\RegistroActualizacion;
 use App\Models\RespuestaExhortoArchivo;
 use Illuminate\Support\Facades\Validator;
 
 class ExhortoController extends Controller
 {
+    public function login(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'email' => 'required|email',
+            'password' => 'required|string',
+        ]);
 
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Datos de login inválidos.',
+                'errors' => $validator->errors(),
+                'data' => null
+            ], 400);
+        }
+
+        $user = User::where('email', $request->email)->first();
+
+        if (!$user || !Hash::check($request->password, $user->password)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Credenciales incorrectas.',
+                'errors' => null,
+                'data' => null
+            ], 401);
+        }
+
+        $token = $user->createToken('api-token')->plainTextToken;
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Login exitoso.',
+            'errors' => null,
+            'data' => [
+                'token' => $token,
+            ]
+        ], 200);
+    }
     public function requestExhorto(Request $request)
     {
         // Validación de datos
@@ -580,7 +619,8 @@ class ExhortoController extends Controller
                 'message' => 'La operación se realizó exitosamente, la respuesta del exhorto se actualizó correctamente.',
                 'errors' => null,
                 'data' => [
-                    'respuestaExhortoId' => $respuestaExhorto->id,
+                    'exhortoId' => $respuestaExhorto->exhortoId,
+                    'actualizacionOrigenId' => $registroActualizacion->actualizacionOrigenId,
                     'fechaHora' => $respuestaExhorto->updated_at,
                 ]
             ], 200);
